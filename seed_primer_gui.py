@@ -101,6 +101,7 @@ class EntropyGenApp:
         self.card_seq = []
         self.dice_seq = []
         self.dnd_throws = []          # list of (d4,d6,d8,d10,d12,d20) tuples
+        self.d8d16_throws = []        # list of (d8, d16a, d16b) tuples
         self.card_buttons = {}
 
         self.header = tk.Frame(root)
@@ -358,6 +359,17 @@ class EntropyGenApp:
                        font=("TkDefaultFont", 10),
                        command=_mode_changed).pack(anchor="w")
 
+        tk.Label(mode_col, text="D8 + D16 \u00d7 2  (one throw = one word, zero waste):",
+                 fg=c["fg"], font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(8, 2))
+        tk.Radiobutton(mode_col, text="12 words (128 bits) \u2014 12 throws",
+                       variable=self.mode_var, value="d8d16_128",
+                       font=("TkDefaultFont", 10),
+                       command=_mode_changed).pack(anchor="w")
+        tk.Radiobutton(mode_col, text="24 words (256 bits) \u2014 24 throws",
+                       variable=self.mode_var, value="d8d16_256",
+                       font=("TkDefaultFont", 10),
+                       command=_mode_changed).pack(anchor="w")
+
         self._mode_advisory = tk.Label(mode_col, fg=c["fg3"],
                                         font=("TkDefaultFont", 9), justify="left")
         self._mode_advisory.pack(anchor="w", pady=(6, 0), fill="x")
@@ -382,6 +394,14 @@ class EntropyGenApp:
             elif m == "dnd_256":
                 txt = ("Full DnD set: D4/D6/D8/D10/D12/D20 in fixed order per throw. "
                        "20 throws minimum (~277 discounted bits).")
+            elif m == "d8d16_128":
+                txt = ("D8 + D16 \u00d7 2: one throw per word. 8\u00d716\u00d716 = 2048 "
+                       "exactly -- one throw maps to one BIP-39 word index, zero waste, "
+                       "zero rejection. 12 throws for 12 words.")
+            elif m == "d8d16_256":
+                txt = ("D8 + D16 \u00d7 2: one throw per word. 8\u00d716\u00d716 = 2048 "
+                       "exactly -- one throw maps to one BIP-39 word index, zero waste, "
+                       "zero rejection. 24 throws for 24 words.")
             else:
                 txt = ""
             self._mode_advisory.config(text=txt)
@@ -576,6 +596,7 @@ class EntropyGenApp:
         self.card_seq = []
         self.dice_seq = []
         self.dnd_throws = []
+        self.d8d16_throws = []
 
         if loss_bits >= 10 and not core.is_dice_only_mode(self.mode):
             messagebox.showwarning("Entropy loss estimated", msg)
@@ -584,6 +605,8 @@ class EntropyGenApp:
             self.show_d6_phase()
         elif core.is_dnd_mode(self.mode):
             self.show_dnd_phase()
+        elif core.is_d8d16_mode(self.mode):
+            self.show_d8d16_phase()
         else:
             self.show_card_phase()
 
@@ -599,6 +622,8 @@ class EntropyGenApp:
             bits += core.dice_roll_bits(self.dice_quality)
         for _ in self.dnd_throws:
             bits += core.dnd_throw_bits(self.dice_quality)
+        for _ in self.d8d16_throws:
+            bits += core.D8D16_BITS_PER_THROW  # 11.0 bits/throw, exact
         return max(0.0, bits - self.shuffle_loss_bits)
 
     def update_gauge(self, canvas, label_var):
@@ -1332,6 +1357,143 @@ class EntropyGenApp:
         self._refresh_dnd_ui()
 
     # ------------------------------------------------------------------
+    # Phase 2d: D8 + D16 × 2 dice phase
+    # ------------------------------------------------------------------
+
+    def show_d8d16_phase(self):
+        self.current_phase_fn = self.show_d8d16_phase
+        self.clear_container()
+        c = self.C()
+        f = self.container
+
+        n_throws = core.d8d16_throws_needed(self.mode)
+
+        tk.Label(f, text="D8 + D16 \u00d7 2 \u2014 one throw per word",
+                 fg=c["fg"], font=("TkDefaultFont", 15, "bold")).pack(anchor="w", pady=(0, 4))
+        tk.Label(f,
+                 text=f"Roll D8 + D16 + D16. Each throw maps directly to one BIP-39 word "
+                      f"(8\u00d716\u00d716 = 2048 exactly). {n_throws} throws required. "
+                      f"Enter each die value then click Commit Throw. "
+                      f"D8: 1\u20138  |  D16: 1\u201316.",
+                 fg=c["fg3"], font=("TkDefaultFont", 10),
+                 wraplength=1020, justify="left").pack(anchor="w", pady=(0, 8))
+
+        # Progress tracker
+        self._d8d16_progress_var = tk.StringVar()
+        self._d8d16_progress_lbl = tk.Label(f, textvariable=self._d8d16_progress_var,
+                                             font=("TkDefaultFont", 11, "bold"), fg=c["fg"])
+        self._d8d16_progress_lbl.pack(anchor="w", pady=(0, 8))
+
+        # Three entry columns: D8 | D16a | D16b
+        entry_frame = tk.Frame(f)
+        entry_frame.pack(anchor="w", pady=(0, 8))
+
+        self._d8d16_staging = [None, None, None]  # [d8, d16a, d16b]
+        self._d8d16_entries = []
+        self._d8d16_entry_labels = []
+
+        for col, (label, max_val) in enumerate([("D8 (1\u20138)", 8),
+                                                 ("D16a (1\u201316)", 16),
+                                                 ("D16b (1\u201316)", 16)]):
+            col_frame = tk.Frame(entry_frame, relief="groove", bd=1)
+            col_frame.grid(row=0, column=col, padx=8, pady=4, sticky="n")
+            tk.Label(col_frame, text=label, fg=c["fg"],
+                     font=("TkDefaultFont", 11, "bold"), width=12).pack(pady=(6, 2))
+            var = tk.StringVar()
+            entry = tk.Entry(col_frame, textvariable=var, width=6,
+                             font=("TkDefaultFont", 16), justify="center")
+            entry.pack(padx=8, pady=(0, 6))
+            self._d8d16_entries.append((var, entry, max_val))
+
+        # Commit + undo buttons
+        btn_row = tk.Frame(f)
+        btn_row.pack(anchor="w", pady=(0, 8))
+        tk.Button(btn_row, text="Commit throw",
+                  command=self._d8d16_commit,
+                  font=("TkDefaultFont", 11, "bold")).pack(side="left", padx=(0, 8))
+        tk.Button(btn_row, text="Undo last throw",
+                  command=self._d8d16_undo).pack(side="left", padx=(0, 8))
+        tk.Button(btn_row, text="Clear entries",
+                  command=self._d8d16_clear_entries).pack(side="left")
+
+        # Throw log
+        tk.Label(f, text="Completed throws:", fg=c["fg"],
+                 font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(4, 0))
+        self._d8d16_log_var = tk.StringVar(value="(no throws yet)")
+        tk.Label(f, textvariable=self._d8d16_log_var, wraplength=1020, justify="left",
+                 font=("TkFixedFont", 11), fg=c["fg2"]).pack(anchor="w", pady=(0, 10))
+
+        # Nav
+        nav = tk.Frame(f)
+        nav.pack(anchor="w")
+        tk.Button(nav, text="\u2190 Back to settings",
+                  command=self.show_settings_screen).pack(side="left", padx=(0, 6))
+        self._d8d16_continue_btn = tk.Button(
+            nav, text="Continue to analysis \u2192",
+            command=self.show_analysis_phase, state="disabled")
+        self._d8d16_continue_btn.pack(side="left")
+
+        self._refresh_d8d16_ui()
+        self._recolor(f)
+
+    def _d8d16_commit(self):
+        """Validate and commit the current staging entries."""
+        c = self.C()
+        vals = []
+        for i, (var, entry, max_val) in enumerate(self._d8d16_entries):
+            raw = var.get().strip()
+            try:
+                v = int(raw)
+                assert 1 <= v <= max_val
+                vals.append(v)
+            except (ValueError, AssertionError):
+                labels = ["D8", "D16a", "D16b"]
+                messagebox.showerror(
+                    "Invalid entry",
+                    f"{labels[i]}: must be an integer between 1 and {max_val}. Got: {raw!r}")
+                return
+        self.d8d16_throws.append(tuple(vals))
+        self._d8d16_clear_entries()
+        self._refresh_d8d16_ui()
+
+    def _d8d16_undo(self):
+        if self.d8d16_throws:
+            self.d8d16_throws.pop()
+        self._refresh_d8d16_ui()
+
+    def _d8d16_clear_entries(self):
+        for var, entry, _ in self._d8d16_entries:
+            var.set("")
+        if self._d8d16_entries:
+            self._d8d16_entries[0][1].focus_set()
+
+    def _refresh_d8d16_ui(self):
+        c = self.C()
+        n_throws = core.d8d16_throws_needed(self.mode)
+        completed = len(self.d8d16_throws)
+        remaining = max(0, n_throws - completed)
+        done = completed >= n_throws
+
+        if done:
+            self._d8d16_progress_var.set(
+                f"Throws: {completed}/{n_throws} \u2713  complete")
+            self._d8d16_progress_lbl.config(fg=c["pass_color"])
+        else:
+            self._d8d16_progress_var.set(
+                f"Throws: {completed}/{n_throws}  ({remaining} remaining)")
+            self._d8d16_progress_lbl.config(fg=c["fg"])
+
+        if self.d8d16_throws:
+            lines = []
+            for i, (d8, d16a, d16b) in enumerate(self.d8d16_throws):
+                lines.append(f"[{i+1}] D8={d8}  D16a={d16a}  D16b={d16b}")
+            self._d8d16_log_var.set("  ".join(lines))
+        else:
+            self._d8d16_log_var.set("(no throws yet)")
+
+        self._d8d16_continue_btn.config(state="normal" if done else "disabled")
+
+    # ------------------------------------------------------------------
     # Phase 3: symbol-level statistical analysis
     # ------------------------------------------------------------------
 
@@ -1357,7 +1519,8 @@ class EntropyGenApp:
 
         self.raw_bits = core.raw_entropy_bits(
             self.card_seq, self.dice_seq,
-            self.dnd_throws if self.dnd_throws else None)
+            self.dnd_throws if self.dnd_throws else None,
+            self.d8d16_throws if self.d8d16_throws else None)
         results = core.run_symbol_tests(
             self.card_seq, self.dice_seq,
             self.dnd_throws if self.dnd_throws else None)
@@ -1436,6 +1599,9 @@ class EntropyGenApp:
         elif core.is_dnd_mode(self.mode):
             back_cmd = self.show_dnd_phase
             back_lbl = "\u2190 Back to DnD dice"
+        elif core.is_d8d16_mode(self.mode):
+            back_cmd = self.show_d8d16_phase
+            back_lbl = "\u2190 Back to D8+D16 dice"
         elif self.mode == "128":
             back_cmd = self.show_card_phase
             back_lbl = "\u2190 Back to cards"
@@ -1547,8 +1713,16 @@ class EntropyGenApp:
             tk.Label(f, text=status_text, font=("TkDefaultFont", 10),
                      fg=status_color).pack(anchor="w", pady=(0, 6))
 
-        entropy_bytes = core.whiten_entropy(raw_bits_to_use, self.target_bits)
-        mnemonic = core.entropy_to_mnemonic(entropy_bytes, wordlist)
+        if core.is_d8d16_mode(self.mode):
+            # D8+D16×2: mnemonic derived directly from throw indices.
+            # Each throw maps to one word; SHA-256 checksum applied to
+            # the entropy bytes derived from those 11-bit indices.
+            mnemonic = core.d8d16_throws_to_mnemonic(self.d8d16_throws, wordlist)
+            entropy_bytes = core.whiten_entropy(
+                core.d8d16_throws_to_raw_bits(self.d8d16_throws), self.target_bits)
+        else:
+            entropy_bytes = core.whiten_entropy(raw_bits_to_use, self.target_bits)
+            mnemonic = core.entropy_to_mnemonic(entropy_bytes, wordlist)
         self._mnemonic = mnemonic
         self._entropy_hex = entropy_bytes.hex()
         self._checksum_bits = core.bip39_checksum_bits(entropy_bytes)
@@ -1752,6 +1926,12 @@ class EntropyGenApp:
                 _dice_only_entropy = n_throws * bits_per_throw
                 _dice_only_label = (f"n_throws({n_throws}) × log₂(460800) = "
                                     f"{_dice_only_entropy:.1f} bits (theoretical DnD entropy)")
+            elif core.is_d8d16_mode(self.mode):
+                n_throws = len(self.d8d16_throws)
+                _dice_only_entropy = n_throws * core.D8D16_BITS_PER_THROW
+                _dice_only_label = (f"n_throws({n_throws}) × 11.0 = "
+                                    f"{_dice_only_entropy:.1f} bits "
+                                    f"(exact: 8×16×16=2048=2¹¹ per throw)")
 
             def _est_worker(rb=raw_bytes_for_est, tgt=self.target_bits,
                             doe=_dice_only_entropy, dol=_dice_only_label):
@@ -1980,6 +2160,7 @@ class EntropyGenApp:
         self.dice_seq = []
         self.dnd_throws = []
         self._d6_dice_per_throw = 5
+        self.d8d16_throws = []
         # Clear all persisted session state, not just cards/dice -- a
         # stale passphrase silently carrying over into a NEW seed's
         # derivation would be a real footgun, and "hidden by default"

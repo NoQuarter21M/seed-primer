@@ -167,12 +167,12 @@ def shuffle_status(shuffle_count: int):
 
 def target_bits_for_mode(mode: str) -> int:
     """128 or 256 bits depending on mode string."""
-    return 256 if mode in ("256", "d6_256", "dnd_256") else 128
+    return 256 if mode in ("256", "d6_256", "dnd_256", "d8d16_256") else 128
 
 
 def cards_needed_for_mode(mode: str) -> int:
     """0 for dice-only modes; card count for card-based modes."""
-    if mode in ("d6_128", "d6_256", "dnd_128", "dnd_256"):
+    if mode in ("d6_128", "d6_256", "dnd_128", "dnd_256", "d8d16_128", "d8d16_256"):
         return 0
     return CARDS_FOR_256 if mode == "256" else CARDS_FOR_128
 
@@ -182,7 +182,7 @@ def is_cards_only_mode(mode: str) -> bool:
 
 
 def is_dice_only_mode(mode: str) -> bool:
-    return mode in ("d6_128", "d6_256", "dnd_128", "dnd_256")
+    return mode in ("d6_128", "d6_256", "dnd_128", "dnd_256", "d8d16_128", "d8d16_256")
 
 
 def is_d6_mode(mode: str) -> bool:
@@ -191,6 +191,10 @@ def is_d6_mode(mode: str) -> bool:
 
 def is_dnd_mode(mode: str) -> bool:
     return mode in ("dnd_128", "dnd_256")
+
+
+def is_d8d16_mode(mode: str) -> bool:
+    return mode in ("d8d16_128", "d8d16_256")
 
 
 def is_two_deck_mode(mode: str) -> bool:
@@ -227,6 +231,72 @@ def dnd_throws_to_raw_bits(throws: list) -> str:
         n = ((((((d4 - 1) * 6 + (d6 - 1)) * 8 + (d8 - 1)) * 10 + (d10 - 1)) * 12 + (d12 - 1)) * 20 + (d20 - 1))
         bits.append(format(n, "019b"))
     return "".join(bits)
+
+
+# ---------------------------------------------------------------------------
+# D8 + D16 + D16 mode constants
+# ---------------------------------------------------------------------------
+# One throw = (d8, d16a, d16b), all 1-indexed.
+# Mapping: N = (d8-1)*256 + (d16a-1)*16 + (d16b-1)
+# Range: 0 .. 2047 -- exactly the BIP-39 word index space.
+# 8 * 16 * 16 = 2048: perfect uniform mapping, zero rejection, zero waste.
+# One throw produces exactly one BIP-39 word index.
+# Throws needed: 12 for 128-bit seed, 24 for 256-bit seed.
+D8D16_THROWS_128 = 12   # one throw per word, 12 words
+D8D16_THROWS_256 = 24   # one throw per word, 24 words
+# Raw bits per throw: log2(2048) = 11.0 (exact, no rounding)
+D8D16_BITS_PER_THROW = 11.0
+
+
+def d8d16_throws_needed(mode: str) -> int:
+    """Number of D8+D16+D16 throws for a given mode."""
+    return D8D16_THROWS_256 if mode == "d8d16_256" else D8D16_THROWS_128
+
+
+def d8d16_throw_to_index(d8: int, d16a: int, d16b: int) -> int:
+    """
+    Map one D8+D16+D16 throw to a BIP-39 word index (0-2047).
+    d8: 1-8, d16a: 1-16, d16b: 1-16.
+    Formula: N = (d8-1)*256 + (d16a-1)*16 + (d16b-1)
+    """
+    return (d8 - 1) * 256 + (d16a - 1) * 16 + (d16b - 1)
+
+
+def d8d16_throws_to_mnemonic(throws: list, wordlist: list) -> list:
+    """
+    Convert a list of (d8, d16a, d16b) tuples directly to BIP-39 words.
+    The last word's index is replaced with the correct BIP-39 checksum word.
+    throws: list of (d8, d16a, d16b) tuples, length 12 or 24.
+    Returns list of words.
+    """
+    n = len(throws)
+    assert n in (12, 24), f"Expected 12 or 24 throws, got {n}"
+    # Convert throws to 11-bit indices and concatenate as bit string
+    bits = "".join(format(d8d16_throw_to_index(*t), "011b") for t in throws)
+    # Total bits: 12*11=132 or 24*11=264
+    # ENT bits: 128 or 256; CS bits: 4 or 8
+    ent_bits = 128 if n == 12 else 256
+    cs_bits  = ent_bits // 32
+    entropy_bits = bits[:ent_bits]
+    entropy_bytes = int(entropy_bits, 2).to_bytes(ent_bits // 8, "big")
+    # Compute BIP-39 checksum
+    import hashlib
+    cs = bin(hashlib.sha256(entropy_bytes).digest()[0])[2:].zfill(8)[:cs_bits]
+    final_bits = entropy_bits + cs
+    # Map back to words
+    words = []
+    for i in range(n):
+        idx = int(final_bits[i*11:(i+1)*11], 2)
+        words.append(wordlist[idx])
+    return words
+
+
+def d8d16_throws_to_raw_bits(throws: list) -> str:
+    """
+    Encode D8+D16+D16 throws as a bit string for the entropy estimator.
+    Each throw maps to an 11-bit word index (0-2047).
+    """
+    return "".join(format(d8d16_throw_to_index(*t), "011b") for t in throws)
 
 
 def compute_upfront_discount_bits(mode: str, shuffle_count: int) -> float:
@@ -301,12 +371,14 @@ def build_raw_string(card_seq: list, dice_seq: list) -> str:
 
 
 def raw_entropy_bits(card_seq: list, dice_seq: list,
-                     dnd_throws: list = None) -> str:
+                     dnd_throws: list = None,
+                     d8d16_throws: list = None) -> str:
     """
     Fixed-width binary encoding used for NIST testing and hashing:
-      - each card:     6 bits (global canonical index 0-51)
-      - each D6 roll:  3 bits (value-1, i.e. 0-5)
-      - each DnD throw: 19 bits (mixed-radix encoding, see dnd_throws_to_raw_bits)
+      - each card:        6 bits (global canonical index 0-51)
+      - each D6 roll:     3 bits (value-1, i.e. 0-5)
+      - each DnD throw:  19 bits (mixed-radix encoding)
+      - each D8+D16+D16: 11 bits (word index 0-2047)
     """
     bits = []
     for card_id in card_seq:
@@ -316,6 +388,8 @@ def raw_entropy_bits(card_seq: list, dice_seq: list,
         bits.append(format(roll - 1, "03b"))
     if dnd_throws:
         bits.append(dnd_throws_to_raw_bits(dnd_throws))
+    if d8d16_throws:
+        bits.append(d8d16_throws_to_raw_bits(d8d16_throws))
     return "".join(bits)
 
 
