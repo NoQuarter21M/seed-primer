@@ -211,3 +211,65 @@ run: ~65s prefetch + ~1s trials.
   is stale (e.g. scanned more than 5 minutes ago).
 - [ ] Consider adding nRF52840 (MDBT50Q-CX) as a second XOR
   source once qualified -- two independent hardware sources.
+
+---
+
+## 2026-08-19 — D8+D16×2 mode addition
+
+**What was built:**
+- New mode: D8+D16×2 (d8d16_128, d8d16_256)
+- One throw = D8 (1-8) + D16 (1-16) + D16 (1-16)
+- Encoding: N = (d8-1)*256 + (d16a-1)*16 + (d16b-1), range 0-2047
+- 8×16×16 = 2048 exactly — perfect BIP-39 word index mapping,
+  zero rejection, zero entropy waste
+- 11.0 bits/throw (exact: log₂(2048) = 11)
+- 12 throws for 128-bit seed, 24 throws for 256-bit seed
+- Mnemonic generated directly from throw indices; SHA-256 checksum
+  applied to the 11-bit-per-throw entropy bytes
+
+**Tests:**
+- test_bip39_checksum.py: test_checksum_d8d16() added -- 200 trials
+  each for 12 and 24 word seeds, encoding bounds verified (29+2=31 PASS)
+- dev_test_harness.py: batch_d8d16() added -- BIP-39 checksum
+  validation (no symbol tests -- one throw per word, no repeated face
+  sequences to test), --all-modes includes d8d16_128 and d8d16_256
+
+---
+
+## 2026-08-19 — Monte Carlo bias=0.99 test (open item closed)
+
+**Test:** n=1000 trials, H1essential mic + Pico 2 ttyACM2, 99% zero-skew bias.
+
+**Results:**
+- WITH Pico XOR, bias=99%: bit Z mean=+0.050, p05=3.1% -- PASS
+- WITHOUT Pico XOR, bias=99%: bit Z mean=+0.024, p05=1.8% -- PASS
+
+**Finding:** SHA-256 whitening absorbs even 99% zero-skew bias
+completely. Both paths pass at every bias level tested (0%, 30%, 70%,
+99%). The Pico XOR's value is the security guarantee (attacker must
+break both sources), not a measurable statistical improvement. SHA-256
+is the dominant equalizer at all practical bias levels.
+
+---
+
+## 2026-08-19 — Platform scanner verification and Pico stale indicator
+
+**Port scanner platform verification (simulated):**
+- Windows fallback: COM1-COM256 generated correctly ✓
+- macOS fallback: /dev/cu.usbmodem* glob path verified ✓
+- Linux VID:PID filter: 32 ttyS* ports excluded, both Pico devices
+  (ttyACM0, ttyACM2) included ✓
+- FTDI (0403:6001) excluded by VID:PID filter ✓
+
+**Pico stale indicator:**
+- Settings panel now shows scan age in seconds when returning to
+  settings after a scan
+- Orange warning after 5 minutes: "⚠ re-scan recommended"
+- Hash phase Pico read: 10s hard thread timeout -- if Pico disconnects
+  between scan and hash, graceful fallback with warning dialog instead
+  of hang
+
+**Open items (remaining):**
+- [ ] Test on real Windows and macOS hardware (platform logic verified
+  by simulation; real hardware test deferred)
+

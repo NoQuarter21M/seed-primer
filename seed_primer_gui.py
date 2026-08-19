@@ -96,6 +96,7 @@ class EntropyGenApp:
         self._pico_enabled = False     # persist across screen rebuilds
         self._pico_port = None         # confirmed port from scan
         self._pico_scan_result = None  # (ok, msg) from last scan
+        self._pico_scan_time = None    # time.time() of last scan
         self._scroll_job = None
 
         self.card_seq = []
@@ -485,10 +486,12 @@ class EntropyGenApp:
                 self._pico_status_var.set("Scanning ports\u2026")
                 self._pico_status_lbl.config(fg=c["fg3"])
                 pico_frame.update_idletasks()
-                import threading
+                import threading, time as _time
                 def _worker():
                     ok_port, msg, chunk = _pico.find_pico()
+                    scan_time = _time.time()
                     def _update():
+                        self._pico_scan_time = scan_time
                         if ok_port:
                             self._pico_port = ok_port
                             self._pico_scan_result = (True, msg)
@@ -508,12 +511,17 @@ class EntropyGenApp:
                                   command=_scan_pico, font=("TkDefaultFont", 10))
             scan_btn.pack(side="right", padx=(8, 0))
 
-            # Restore last scan result if available
+            # Restore last scan result with staleness indicator
             if self._pico_scan_result is not None:
+                import time as _time
                 ok, msg = self._pico_scan_result
-                self._pico_status_var.set(f"\u2713 {msg}" if ok else f"\u2718 {msg}")
+                age_s = int(_time.time() - self._pico_scan_time) if self._pico_scan_time else 0
+                stale = age_s > 300  # stale after 5 minutes
+                age_str = f" (scanned {age_s}s ago{' \u26a0 re-scan recommended' if stale else ''})"
+                self._pico_status_var.set(
+                    (f"\u2713 {msg}" if ok else f"\u2718 {msg}") + age_str)
                 self._pico_status_lbl.config(
-                    fg=c["pass_color"] if ok else c["fail_color"])
+                    fg=c["zone_orange"] if stale else (c["pass_color"] if ok else c["fail_color"]))
 
             tk.Label(pico_frame,
                      text="The Pico's qualified TRNG output (NIST SP 800-90B, 7.466 bits/byte) "
@@ -1683,8 +1691,30 @@ class EntropyGenApp:
 
         if pico_ready:
             try:
+                import threading as _thr
                 raw_byte_len = (len(self.raw_bits) + 7) // 8
-                pico_bytes = _pico.get_trng_bytes(raw_byte_len, port=self._pico_port)
+                result_box = [None]
+                error_box  = [None]
+
+                def _read():
+                    try:
+                        result_box[0] = _pico.get_trng_bytes(
+                            raw_byte_len, port=self._pico_port)
+                    except Exception as e:
+                        error_box[0] = e
+
+                t = _thr.Thread(target=_read, daemon=True)
+                t.start()
+                t.join(timeout=10)   # 10s hard cap -- Pico should respond in <1s
+
+                if t.is_alive():
+                    raise TimeoutError(
+                        "Pico did not respond within 10 seconds. "
+                        "It may have been disconnected since the settings scan.")
+                if error_box[0] is not None:
+                    raise error_box[0]
+
+                pico_bytes = result_box[0]
                 raw_int = int(self.raw_bits, 2)
                 raw_byte_val = raw_int.to_bytes(raw_byte_len, "big")
                 xored = core.xor_mix_external_source(raw_byte_val, pico_bytes)
@@ -1695,7 +1725,8 @@ class EntropyGenApp:
                 messagebox.showwarning(
                     "Pico TRNG error",
                     f"Could not read Pico TRNG at {self._pico_port}:\n{e}\n\n"
-                    f"Proceeding with card/dice entropy only.")
+                    f"Proceeding with card/dice entropy only.\n"
+                    f"Re-scan the Pico in settings before trying again.")
 
         if _PICO_MODULE_AVAILABLE:
             if pico_mixed:

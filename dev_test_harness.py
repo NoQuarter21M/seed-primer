@@ -197,6 +197,43 @@ def batch_dnd(n_trials, mode, dice_quality="consumer"):
                          extra=f"{min_throws} throws/trial (D4/D6/D8/D10/D12/D20), {dice_quality} dice")
 
 
+def batch_d8d16(n_trials, mode):
+    """Batch test for D8+D16×2 modes (d8d16_128 or d8d16_256).
+    D8+D16×2 maps directly to word indices -- no symbol-level tests
+    apply (the statistical tests are designed for repeated die faces,
+    not one-throw-per-word). We verify BIP-39 checksum validity instead."""
+    n_throws = core.d8d16_throws_needed(mode)
+
+    import os, sys
+    wl_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wordlist_english.txt")
+    with open(wl_path) as f:
+        wordlist = [l.strip() for l in f if l.strip()]
+
+    import hashlib
+    failures = 0
+    for _ in range(n_trials):
+        throws = [
+            (rng.randint(1,8), rng.randint(1,16), rng.randint(1,16))
+            for _ in range(n_throws)
+        ]
+        words = core.d8d16_throws_to_mnemonic(throws, wordlist)
+        # Verify checksum
+        bits = "".join(bin(wordlist.index(w))[2:].zfill(11) for w in words)
+        ent_bits = 128 if n_throws == 12 else 256
+        cs_bits = ent_bits // 32
+        ent_bytes = int(bits[:ent_bits], 2).to_bytes(ent_bits // 8, "big")
+        expected_cs = bin(hashlib.sha256(ent_bytes).digest()[0])[2:].zfill(8)[:cs_bits]
+        if bits[ent_bits:] != expected_cs:
+            failures += 1
+
+    print(f"\n=== D8+D16×2 checksum test: {n_trials} trials, mode={mode} ===")
+    print(f"Settings: {n_throws} throws/trial (1 throw = 1 word, 8×16×16=2048 exact)")
+    if failures == 0:
+        print(f"  All {n_trials} trials produced valid BIP-39 checksums. PASS")
+    else:
+        print(f"  FAIL: {failures}/{n_trials} invalid checksums")
+
+
 def _print_batch_results(n_trials, mode, tiers, test_flags, test_borderlines, extra=""):
     print(f"\n=== Batch: {n_trials} trials, mode={mode} ===")
     if extra:
@@ -309,11 +346,12 @@ def main():
     parser = argparse.ArgumentParser(
         description="Dev-only test harness for SeedPrimer statistical tests")
     parser.add_argument("--mode",
-                        choices=["128", "256", "d6_128", "d6_256", "dnd_128", "dnd_256"],
+                        choices=["128", "256", "d6_128", "d6_256", "dnd_128", "dnd_256",
+                                 "d8d16_128", "d8d16_256"],
                         default="256",
                         help="Seed mode (default: 256)")
     parser.add_argument("--all-modes", type=int, metavar="N",
-                        help="Run batch test on ALL six modes with N trials each")
+                        help="Run batch test on ALL eight modes with N trials each")
     parser.add_argument("--batch", type=int, metavar="N",
                         help="Run N random trials and report tier distribution")
     parser.add_argument("--adversarial", type=int, metavar="N",
@@ -326,11 +364,14 @@ def main():
 
     if args.all_modes:
         n = args.all_modes
-        for m in ["128", "256", "d6_128", "d6_256", "dnd_128", "dnd_256"]:
+        for m in ["128", "256", "d6_128", "d6_256", "dnd_128", "dnd_256",
+                  "d8d16_128", "d8d16_256"]:
             if core.is_d6_mode(m):
                 batch_d6(n, m, args.dice_quality)
             elif core.is_dnd_mode(m):
                 batch_dnd(n, m, args.dice_quality)
+            elif core.is_d8d16_mode(m):
+                batch_d8d16(n, m)
             else:
                 batch(n, m, args.shuffles, args.dice_quality)
     elif args.batch:
@@ -338,6 +379,8 @@ def main():
             batch_d6(args.batch, args.mode, args.dice_quality)
         elif core.is_dnd_mode(args.mode):
             batch_dnd(args.batch, args.mode, args.dice_quality)
+        elif core.is_d8d16_mode(args.mode):
+            batch_d8d16(args.batch, args.mode)
         else:
             batch(args.batch, args.mode, args.shuffles, args.dice_quality)
     elif args.adversarial:

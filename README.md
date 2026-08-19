@@ -22,6 +22,8 @@ dependencies beyond Python 3 and tkinter (pyserial optional, for Pico TRNG).
 | D6 only (256-bit) | D6 dice rolls in groups | 120 rolls (24 groups of 5) | 24 | 256-bit |
 | DnD (128-bit) | D4/D6/D8/D10/D12/D20 full set | 10 throws | 12 | 128-bit |
 | DnD (256-bit) | D4/D6/D8/D10/D12/D20 full set | 20 throws | 24 | 256-bit |
+| D8+D16×2 (128-bit) | D8 + D16 + D16 | 12 throws | 12 | 128-bit |
+| D8+D16×2 (256-bit) | D8 + D16 + D16 | 24 throws | 24 | 256-bit |
 
 ---
 

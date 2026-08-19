@@ -215,6 +215,46 @@ def test_known_vectors():
 # 3. Edge cases
 # ---------------------------------------------------------------------------
 
+def test_checksum_d8d16(n_words: int, n_trials: int = 200):
+    """Test D8+D16×2 mnemonic generation via d8d16_throws_to_mnemonic."""
+    label = f"D8+D16×2 {n_words}-word"
+    print(f"\n--- {label} ({n_trials} trials) ---")
+
+    wl_path = os.path.join(os.path.dirname(__file__), "wordlist_english.txt")
+    with open(wl_path) as f:
+        wordlist = [l.strip() for l in f if l.strip()]
+
+    n_throws = 12 if n_words == 12 else 24
+    failures = 0
+
+    for i in range(n_trials):
+        throws = [
+            (secrets.randbelow(8)+1, secrets.randbelow(16)+1, secrets.randbelow(16)+1)
+            for _ in range(n_throws)
+        ]
+        words = core.d8d16_throws_to_mnemonic(throws, wordlist)
+        mnemonic = " ".join(words)
+
+        valid, reason = validate_mnemonic(mnemonic, wordlist)
+        if not valid:
+            failures += 1
+            if failures <= 3:
+                fail(f"trial {i}: {reason}")
+
+        # Also verify encoding bounds
+        for d8, d16a, d16b in throws:
+            idx = core.d8d16_throw_to_index(d8, d16a, d16b)
+            if not (0 <= idx <= 2047):
+                fail(f"trial {i}: index {idx} out of range 0-2047")
+                failures += 1
+
+    if failures == 0:
+        ok(f"all {n_trials} trials produced valid BIP-39 checksums")
+    else:
+        fail(f"{failures}/{n_trials} trials had invalid checksums")
+
+
+
 def test_edge_cases():
     print("\n--- Edge cases ---")
 
@@ -282,6 +322,8 @@ def main():
     test_checksum_for_mode("D6-only 256-bit",        24)
     test_checksum_for_mode("DnD 128-bit",            12)
     test_checksum_for_mode("DnD 256-bit",            24)
+    test_checksum_d8d16(12)
+    test_checksum_d8d16(24)
 
     print()
     print("=" * 62)
