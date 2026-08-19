@@ -10,6 +10,10 @@ your physical draw before committing to a seed.
 Designed to run offline on an air-gapped laptop. No network code. No external
 dependencies beyond Python 3 and tkinter (pyserial optional, for Pico TRNG).
 
+See **[TUTORIAL.md](TUTORIAL.md)** for a complete step-by-step guide covering
+installation, every input mode, Pico 2 firmware setup and qualification,
+safe mnemonic recording, and air-gapped operation.
+
 ---
 
 ## Input modes
