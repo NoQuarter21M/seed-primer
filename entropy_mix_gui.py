@@ -69,8 +69,8 @@ from bitcoin_gui_theme import THEMES
 class EntropyGenApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Entropy Mixer")
-        self.root.geometry("1250x880")
+        self.root.title("SeedPrimer")
+        self.root.geometry("1280x1000")
         self.root.minsize(1150, 720)
 
         self.theme = "dark"
@@ -111,8 +111,38 @@ class EntropyGenApp:
         self.theme_btn = tk.Button(self.header, text="Light mode", command=self.toggle_theme)
         self.theme_btn.pack(side="right", padx=14, pady=4)
 
-        self.container = tk.Frame(root)
-        self.container.pack(fill="both", expand=True, padx=14, pady=8)
+        # Scrollable content area: canvas + persistent scrollbar + inner frame.
+        # The scrollbar is always visible on the right side regardless of
+        # content height. self.container is the inner frame that phase builders
+        # pack widgets into -- identical interface to before.
+        self._scroll_outer = tk.Frame(root)
+        self._scroll_outer.pack(fill="both", expand=True)
+
+        self._scrollbar = tk.Scrollbar(self._scroll_outer, orient="vertical")
+        self._scrollbar.pack(side="right", fill="y")
+
+        self._canvas = tk.Canvas(self._scroll_outer,
+                                  yscrollcommand=self._scrollbar.set,
+                                  highlightthickness=0)
+        self._canvas.pack(side="left", fill="both", expand=True)
+        self._scrollbar.config(command=self._canvas.yview)
+
+        self.container = tk.Frame(self._canvas, padx=14, pady=8)
+        self._canvas_window = self._canvas.create_window(
+            (0, 0), window=self.container, anchor="nw")
+
+        # Resize the canvas window width when the canvas is resized
+        self._canvas.bind("<Configure>", self._on_canvas_configure)
+        # Update scroll region when the inner frame changes size
+        self.container.bind("<Configure>", self._on_frame_configure)
+
+        # Mouse wheel scrolling
+        self.root.bind_all("<MouseWheel>",
+                            lambda e: self._canvas.yview_scroll(-1*(e.delta//120), "units"))
+        self.root.bind_all("<Button-4>",
+                            lambda e: self._canvas.yview_scroll(-1, "units"))
+        self.root.bind_all("<Button-5>",
+                            lambda e: self._canvas.yview_scroll(1, "units"))
 
         # Auto-mask on focus loss: only active during Step 4.
         # When the window loses focus, all revealed sensitive fields
@@ -122,6 +152,16 @@ class EntropyGenApp:
 
         self.show_settings_screen()
         self.apply_theme()
+
+    def _on_canvas_configure(self, event):
+        """Keep inner frame width matched to canvas width."""
+        self._canvas.itemconfig(self._canvas_window, width=event.width)
+
+    def _on_frame_configure(self, event):
+        """Update scroll region whenever inner frame resizes."""
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+        # Scroll back to top whenever the screen changes
+        self._canvas.yview_moveto(0)
 
     def C(self):
         return THEMES[self.theme]
@@ -139,6 +179,8 @@ class EntropyGenApp:
         self.header.configure(bg=c["bg"])
         self.header_label.configure(bg=c["bg"], fg=c["fg3"])
         self.theme_btn.configure(bg=c["entry_bg"], fg=c["fg"])
+        self._scroll_outer.configure(bg=c["bg"])
+        self._canvas.configure(bg=c["bg"])
         self.container.configure(bg=c["bg"])
         self._recolor(self.container)
 
