@@ -511,17 +511,36 @@ class EntropyGenApp:
                                   command=_scan_pico, font=("TkDefaultFont", 10))
             scan_btn.pack(side="right", padx=(8, 0))
 
+            def _reset_pico():
+                """Clear scan state so user can start fresh."""
+                self._pico_port = None
+                self._pico_scan_result = None
+                self._pico_scan_time = None
+                self._pico_enabled = False
+                if hasattr(self, '_pico_enable_var'):
+                    self._pico_enable_var.set(False)
+                self._pico_status_var.set("Not scanned — click Scan for Pico")
+                self._pico_status_lbl.config(fg=c["fg3"])
+
+            tk.Button(pico_status_row, text="Reset",
+                       command=_reset_pico,
+                       font=("TkDefaultFont", 10)).pack(side="right", padx=(0, 4))
+
             # Restore last scan result with staleness indicator
             if self._pico_scan_result is not None:
                 import time as _time
                 ok, msg = self._pico_scan_result
                 age_s = int(_time.time() - self._pico_scan_time) if self._pico_scan_time else 0
-                stale = age_s > 300  # stale after 5 minutes
-                age_str = f" (scanned {age_s}s ago{' \u26a0 re-scan recommended' if stale else ''})"
-                self._pico_status_var.set(
-                    (f"\u2713 {msg}" if ok else f"\u2718 {msg}") + age_str)
-                self._pico_status_lbl.config(
-                    fg=c["zone_orange"] if stale else (c["pass_color"] if ok else c["fail_color"]))
+                stale = age_s > 30  # stale after 30 seconds
+                if stale:
+                    self._pico_status_var.set(
+                        f"\u26a0  SCAN STALE ({age_s}s ago) \u2014 re-scan required before proceeding. "
+                        f"Disconnect and reconnect the Pico if the scan hangs.")
+                    self._pico_status_lbl.config(fg=c["fail_color"])
+                else:
+                    self._pico_status_var.set(f"\u2713 {msg} ({age_s}s ago)")
+                    self._pico_status_lbl.config(
+                        fg=c["pass_color"] if ok else c["fail_color"])
 
             tk.Label(pico_frame,
                      text="The Pico's qualified TRNG output (NIST SP 800-90B, 7.466 bits/byte) "
@@ -585,6 +604,34 @@ class EntropyGenApp:
         self._settings_mode = self.mode_var.get()
         self._settings_shuffle = self.shuffle_var.get()
         self._settings_dice = self.dice_quality_var.get()
+
+        # Block if Pico is enabled but scan is stale or missing
+        if self._pico_enabled and _PICO_MODULE_AVAILABLE:
+            import time as _time
+            if self._pico_scan_time is None:
+                messagebox.showerror(
+                    "Pico not scanned",
+                    "Pico TRNG is enabled but has not been scanned.\n\n"
+                    "Click 'Scan for Pico' in the settings panel before proceeding, "
+                    "or uncheck the Pico enable checkbox to proceed without it.")
+                return
+            age_s = int(_time.time() - self._pico_scan_time)
+            if age_s > 30:
+                messagebox.showerror(
+                    "Pico scan stale",
+                    f"Pico scan is {age_s} seconds old (limit: 30s).\n\n"
+                    "Re-scan now to confirm the Pico is still connected and responding. "
+                    "If the scan hangs, disconnect and reconnect the USB cable, "
+                    "then scan again.\n\n"
+                    "To proceed without the Pico, uncheck the enable checkbox.")
+                return
+            if self._pico_port is None:
+                messagebox.showerror(
+                    "Pico not found",
+                    "Pico TRNG is enabled but no device was found on the last scan.\n\n"
+                    "Connect the Pico and click 'Scan for Pico', or uncheck the "
+                    "enable checkbox to proceed without it.")
+                return
 
         if core.is_dice_only_mode(self._settings_mode):
             blocked, loss_bits, msg = False, 0.0, ""
@@ -1722,11 +1769,33 @@ class EntropyGenApp:
                 raw_bits_to_use = xored_bits[:len(self.raw_bits)]
                 pico_mixed = True
             except Exception as e:
-                messagebox.showwarning(
-                    "Pico TRNG error",
-                    f"Could not read Pico TRNG at {self._pico_port}:\n{e}\n\n"
-                    f"Proceeding with card/dice entropy only.\n"
-                    f"Re-scan the Pico in settings before trying again.")
+                # Hard block -- do not proceed to Step 4 without the Pico
+                # when the user has explicitly enabled it. Show a dialog
+                # with two options: return to settings (re-scan) or return
+                # to the previous input phase (redo physical draws).
+                import tkinter.messagebox as _mb
+                _mb.showerror(
+                    "Pico TRNG failed \u2014 cannot proceed",
+                    f"Could not read Pico TRNG at {self._pico_port}:\n\n"
+                    f"{e}\n\n"
+                    f"The Pico was enabled and its contribution is required. "
+                    f"Step 4 cannot proceed without it.\n\n"
+                    f"Options:\n"
+                    f"  \u2022 Reconnect the Pico and return to Settings to re-scan.\n"
+                    f"  \u2022 Return to the previous step and disable the Pico "
+                    f"in settings before proceeding without it.")
+                # Determine the right back destination
+                if core.is_d6_mode(self.mode):
+                    self.show_d6_phase()
+                elif core.is_dnd_mode(self.mode):
+                    self.show_dnd_phase()
+                elif core.is_d8d16_mode(self.mode):
+                    self.show_d8d16_phase()
+                elif self.mode == "128":
+                    self.show_card_phase()
+                else:
+                    self.show_analysis_phase()
+                return
 
         if _PICO_MODULE_AVAILABLE:
             if pico_mixed:
