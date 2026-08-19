@@ -531,7 +531,7 @@ estimate for your specific device.
 **The reference device** (the one used during SeedPrimer development)
 was assessed at **5.306 bits/byte** (restart test, the conservative
 binding figure) and **7.466 bits/byte** (non-IID sequential). Full
-results are in `secure-mint-devices/pico2-rp2350/qualification/`.
+results are in the `secure-mint-devices` repository.
 
 **Step 1: Capture 2 MB of raw output**
 
@@ -573,7 +573,7 @@ The restart test requires 1000 genuine cold power-cycles and is the
 most demanding track. It requires a power-cycling rig (e.g. a USB hub
 with per-port power switching and `uhubctl`). See the reference
 qualification at
-`secure-mint-devices/pico2-rp2350/qualification/QUALIFICATION.md`
+the `secure-mint-devices` repository
 for the full procedure.
 
 ### Using an unqualified device

@@ -177,7 +177,7 @@ The Pico 2 has no WiFi, no Bluetooth, no network connection of any
 kind. The only channel it has is the USB cable to your laptop. The
 firmware source code is in this repository and is auditable. If you
 want to verify the binary matches the source, the build instructions
-are in `../secure-mint-devices/pico2-rp2350/`.
+are in `pico-firmware/` (firmware) and the `secure-mint-devices` repository (qualification data).
 
 **The Pico is stateless and stores nothing.** The firmware is 52 lines
 of C. The full protocol is: host sends one byte `R`, Pico replies with
@@ -185,7 +185,7 @@ of C. The full protocol is: host sends one byte `R`, Pico replies with
 of prior requests. The output buffer is stack-allocated and exists only
 for the duration of one response. Unplug the Pico and nothing is
 retained — there is nothing to retain. Read it yourself:
-`secure-mint-devices/pico2-rp2350/firmware/main.c`.
+`pico-firmware/main.c` (included in this repo).
 
 More importantly: the Pico never sees your seed. It never sees your
 cards, dice, or DnD throws. It produces bytes before your physical
@@ -203,7 +203,7 @@ Pico cannot reduce your security below that floor.
 
 ### "The NIST qualification could be fabricated or tested incorrectly."
 
-The qualification data is in `../secure-mint-devices/pico2-rp2350/`.
+The qualification data is in the `secure-mint-devices` repository.
 The raw sample files are there. The NIST SP 800-90B assessment tool
 that produced the results is open source at
 github.com/usnistgov/SP800-90B_EntropyAssessment. You can download it,
@@ -278,7 +278,7 @@ changes; the XOR guarantee does not.
 - **Assessed min-entropy:** 7.466 bits/byte (non-IID), 7.302 (IID)
 - **Standard:** NIST SP 800-90B
 - **Health floor:** 4.24 bits/byte (80% of validated baseline)
-- **Full record:** `../secure-mint-devices/pico2-rp2350/qualification.json`
-- **Firmware:** `../secure-mint-devices/pico2-rp2350/firmware/`
+- **Full record:** the `secure-mint-devices` repository
+- **Firmware:** `pico-firmware/` (included in this repo)
 
 

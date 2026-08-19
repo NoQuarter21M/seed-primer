@@ -114,8 +114,9 @@ The Pico is optional. The app runs without it; the Pico panel simply
 does not appear if no device is found.
 
 **Qualification:** Pico 2 (RP2350) assessed at 7.466 bits/byte non-IID
-under NIST SP 800-90B. Full qualification record in
-`../secure-mint-devices/pico2-rp2350/qualification.json`.
+under NIST SP 800-90B. Full qualification record and raw capture data
+in the `secure-mint-devices` repository. See `TUTORIAL.md` Section 8
+for the qualification procedure and how to run it on your own device.
 
 **The Pico is stateless and stores nothing.** The firmware is 52 lines
 of C. The full protocol is: host sends one byte `R`, Pico replies with
@@ -123,7 +124,7 @@ of C. The full protocol is: host sends one byte `R`, Pico replies with
 of prior requests. The output buffer is stack-allocated and exists only
 for the duration of one response. Unplug the Pico and nothing is
 retained — there is nothing to retain. You can read and verify this
-yourself: `secure-mint-devices/pico2-rp2350/firmware/main.c`.
+yourself: `pico-firmware/main.c` (included in this repo).
 
 See [PICO_TRNG.md](PICO_TRNG.md) for the full adversarial explainer,
 including per-mode analysis and skeptical Q&A.
