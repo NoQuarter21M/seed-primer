@@ -179,6 +179,14 @@ firmware source code is in this repository and is auditable. If you
 want to verify the binary matches the source, the build instructions
 are in `../secure-mint-devices/pico2-rp2350/`.
 
+**The Pico is stateless and stores nothing.** The firmware is 52 lines
+of C. The full protocol is: host sends one byte `R`, Pico replies with
+256 raw TRNG bytes, loop. No flash writes. No session state. No memory
+of prior requests. The output buffer is stack-allocated and exists only
+for the duration of one response. Unplug the Pico and nothing is
+retained — there is nothing to retain. Read it yourself:
+`secure-mint-devices/pico2-rp2350/firmware/main.c`.
+
 More importantly: the Pico never sees your seed. It never sees your
 cards, dice, or DnD throws. It produces bytes before your physical
 input is processed. Those bytes go into the XOR before SHA-256 runs.
