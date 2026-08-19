@@ -40,7 +40,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import entropy_mix_core as core
+import seed_primer_core as core
 
 SUITS = ["S", "H", "D", "C"]
 RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-entropy_mix_gui.py
+seed_primer_gui.py
 
 Card + Dice Entropy Generator -- tkinter GUI.
 
@@ -20,7 +20,7 @@ import sys
 import tkinter as tk
 from tkinter import messagebox
 
-import entropy_mix_core as core
+import seed_primer_core as core
 
 # Optional entropy quality estimator (entropy-bruteforce project).
 # Imported lazily so the GUI works even if the file is not present.
@@ -96,6 +96,7 @@ class EntropyGenApp:
         self._pico_enabled = False     # persist across screen rebuilds
         self._pico_port = None         # confirmed port from scan
         self._pico_scan_result = None  # (ok, msg) from last scan
+        self._scroll_job = None
 
         self.card_seq = []
         self.dice_seq = []
@@ -156,12 +157,19 @@ class EntropyGenApp:
     def _on_canvas_configure(self, event):
         """Keep inner frame width matched to canvas width."""
         self._canvas.itemconfig(self._canvas_window, width=event.width)
+        self._update_scrollregion()
 
     def _on_frame_configure(self, event):
-        """Update scroll region whenever inner frame resizes."""
-        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
-        # Scroll back to top whenever the screen changes
-        self._canvas.yview_moveto(0)
+        """Update scroll region immediately -- no debounce needed since
+        winfo_reqheight() is accurate during a Configure event."""
+        self._update_scrollregion()
+
+    def _update_scrollregion(self):
+        """Set scroll region to exact content height."""
+        self._scroll_job = None
+        h = self.container.winfo_reqheight()
+        if h > 1:
+            self._canvas.configure(scrollregion=(0, 0, 0, h))
 
     def C(self):
         return THEMES[self.theme]
@@ -242,6 +250,10 @@ class EntropyGenApp:
         for w in self.container.winfo_children():
             w.destroy()
         self._in_hash_phase = False
+        # Scroll back to top on every screen transition
+        self._canvas.yview_moveto(0)
+        # Re-bind the frame configure handler (cleared above)
+        self.container.bind("<Configure>", self._on_frame_configure)
 
     def _on_focus_out(self, event):
         """Auto-mask all sensitive fields when the window loses focus.
@@ -810,7 +822,16 @@ class EntropyGenApp:
         c = self.C()
         self.update_gauge(self._dice_gauge_canvas, self.dice_gauge_label)
         n = len(self.dice_seq)
-        self.dice_log_label.set(" ".join(str(d) for d in self.dice_seq) if self.dice_seq else "(no rolls yet)")
+        if self.dice_seq:
+            groups = []
+            seq = self.dice_seq[:]
+            while seq:
+                grp = seq[:5]
+                seq = seq[5:]
+                groups.append("[" + " ".join(str(x) for x in grp) + "]")
+            self.dice_log_label.set("  ".join(groups))
+        else:
+            self.dice_log_label.set("(no rolls yet)")
         fraction = self.discounted_bits_so_far() / self.target_bits if self.target_bits else 0
         gauge_met = fraction >= 1.0
         minimum_met = n >= core.DICE_MIN_ROLLS
@@ -1460,35 +1481,7 @@ class EntropyGenApp:
         self._in_hash_phase = True
         c = self.C()
 
-        # Scrollable wrapper -- this screen has grown substantially
-        # (master fingerprint, network toggle, 4 xpub standards) and may
-        # not fit every screen without scrolling.
-        canvas = tk.Canvas(self.container, highlightthickness=0, bg=c["bg"])
-        vsb = tk.Scrollbar(self.container, orient="vertical", command=canvas.yview)
-        canvas.configure(yscrollcommand=vsb.set)
-        vsb.pack(side="right", fill="y")
-        canvas.pack(side="left", fill="both", expand=True)
-        f = tk.Frame(canvas, bg=c["bg"])
-        canvas_window = canvas.create_window((0, 0), window=f, anchor="nw")
-
-        def _on_configure(event):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-        f.bind("<Configure>", _on_configure)
-
-        def _on_canvas_resize(event):
-            canvas.itemconfig(canvas_window, width=event.width)
-        canvas.bind("<Configure>", _on_canvas_resize)
-
-        def _on_mousewheel(event):
-            if event.num == 4:
-                canvas.yview_scroll(-1, "units")
-            elif event.num == 5:
-                canvas.yview_scroll(1, "units")
-            else:
-                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        canvas.bind_all("<Button-4>", _on_mousewheel)
-        canvas.bind_all("<Button-5>", _on_mousewheel)
+        f = self.container
 
         tk.Label(f, text="Step 4 \u2014 hashing, mnemonic, and key derivation", fg=c["fg"],
                  font=("TkDefaultFont", 15, "bold")).pack(anchor="w", pady=(0, 4))
@@ -1810,6 +1803,8 @@ class EntropyGenApp:
 
         self._derive_and_refresh()
         self._recolor(f)
+        # Catchup update 1s after load -- covers async estimator completion
+        self.root.after(1000, self._update_scrollregion)
 
     def _toggle_word(self, btn, word, idx):
         """Reveal on first click, re-mask on second click."""
@@ -1858,6 +1853,8 @@ class EntropyGenApp:
         # Insert before toggle button (pack order: status → banner → detail_frame → toggle)
         banner.pack(anchor="w", padx=8, pady=(2, 6),
                     before=self._est_toggle_btn)
+        # Estimator added content dynamically -- force scroll region update
+        self.root.after(100, self._update_scrollregion)
         self._recolor(self._est_outer)
 
     def _toggle_est_detail(self):
@@ -1877,6 +1874,8 @@ class EntropyGenApp:
             self._est_toggle_btn.config(text="Hide detail ▲")
             self._est_expanded = True
         self._recolor(self._est_detail_frame)
+        # Content height changed -- update scroll region
+        self.root.after(100, self._update_scrollregion)
 
     def _mask_all_words(self):
         for i, btn in enumerate(self._word_buttons):

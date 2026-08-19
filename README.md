@@ -153,7 +153,7 @@ pip install pyserial
 # Run
 ./run_gui.sh
 # or
-python3 entropy_mix_gui.py
+python3 seed_primer_gui.py
 ```
 
 **Air-gapped machines:** copy the entire folder via USB. Run
@@ -166,8 +166,8 @@ available. If tkinter is missing, see the remediation steps it prints.
 
 | File | Purpose |
 |---|---|
-| `entropy_mix_gui.py` | Main GUI application |
-| `entropy_mix_core.py` | Core logic: encoding, tests, whitening, BIP-39 |
+| `seed_primer_gui.py` | Main GUI application |
+| `seed_primer_core.py` | Core logic: encoding, tests, whitening, BIP-39 |
 | `pico_trng_source.py` | Pico TRNG interface: scan, probe, bulk fetch |
 | `qr_encoder.py` | From-scratch QR generation (no external library) |
 | `wordlist_english.txt` | Official BIP-39 English wordlist |

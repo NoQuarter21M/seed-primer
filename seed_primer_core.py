@@ -1,5 +1,5 @@
 """
-entropy_mix_core.py
+seed_primer_core.py
 
 Core, testable functions for the Card + Dice Entropy Generator.
 

@@ -4,4 +4,4 @@
 #   ./run_gui.sh
 
 cd "$(dirname "$0")"
-python3 entropy_mix_gui.py
+python3 seed_primer_gui.py

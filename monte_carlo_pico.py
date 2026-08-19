@@ -40,7 +40,7 @@ import sys, os, math, time, argparse, csv, struct
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pico_trng_source as pico_mod
-import entropy_mix_core as core
+import seed_primer_core as core
 
 # ---------------------------------------------------------------------------
 # Entropy source: H1essential microphone

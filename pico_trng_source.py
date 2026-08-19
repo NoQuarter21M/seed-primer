@@ -107,47 +107,79 @@ def get_trng_bulk(n_bytes: int, port: str = DEFAULT_PORT,
     return bytes(out[:n_bytes])
 
 
+# Raspberry Pi Foundation USB Vendor ID and Pico CDC Product ID.
+# Only devices matching this VID:PID are considered candidates.
+# This prevents the port scanner from probing unrelated serial devices.
+PICO_VID = 0x2E8A
+PICO_PID = 0x0009
+
+
 def scan_ports() -> list:
-    """Return a list of likely serial port paths to probe for the Pico.
-    Handles Linux (/dev/ttyACM*, /dev/ttyUSB*), macOS (/dev/cu.usbmodem*),
-    and Windows (COM1-COM256)."""
-    import glob, sys
-    if sys.platform.startswith("win"):
-        return [f"COM{i}" for i in range(1, 257)]
-    elif sys.platform.startswith("darwin"):
-        return (sorted(glob.glob("/dev/cu.usbmodem*")) +
-                sorted(glob.glob("/dev/tty.usbmodem*")))
-    else:
-        # Linux
-        return sorted(glob.glob("/dev/ttyACM*")) + sorted(glob.glob("/dev/ttyUSB*"))
+    """Return serial ports belonging to a Raspberry Pi Pico (VID:PID 2e8a:0009).
+    Uses pyserial's list_ports to filter by VID/PID before probing -- no
+    unrelated serial devices are ever opened or probed.
+    Falls back to glob-based scan if pyserial list_ports is unavailable."""
+    import sys
+    try:
+        import serial.tools.list_ports
+        candidates = [
+            p.device for p in serial.tools.list_ports.comports()
+            if p.vid == PICO_VID and p.pid == PICO_PID
+        ]
+        return sorted(candidates)
+    except Exception:
+        # Fallback: glob-based scan without VID/PID filtering
+        import glob
+        if sys.platform.startswith("win"):
+            return [f"COM{i}" for i in range(1, 257)]
+        elif sys.platform.startswith("darwin"):
+            return (sorted(glob.glob("/dev/cu.usbmodem*")) +
+                    sorted(glob.glob("/dev/tty.usbmodem*")))
+        else:
+            return sorted(glob.glob("/dev/ttyACM*")) + sorted(glob.glob("/dev/ttyUSB*"))
 
 
 def probe_port(port: str, baud: int = DEFAULT_BAUD) -> tuple:
     """
     Try to get one chunk from the Pico at the given port.
     Returns (ok: bool, message: str, bytes_or_none).
-    Fast -- uses a shorter timeout than get_trng_bytes.
-    Does NOT sleep 2s; intended for quick port scanning.
+    Uses short timeouts -- intended for quick port scanning only.
+    Per-port hard timeout of 2s via threading to prevent hangs on
+    devices that open but never respond (e.g. wrong firmware).
     """
-    import os, sys
-    # Windows COM ports don't appear as filesystem paths
+    import os, sys, threading
+
     if not sys.platform.startswith("win") and not os.path.exists(port):
         return False, f"{port}: not found", None
-    try:
-        with serial.Serial(port, baudrate=baud, timeout=2) as ser:
-            time.sleep(0.5)  # brief settle
-            ser.reset_input_buffer()
-            ser.write(b"R")
-            chunk = ser.read(CHUNK_BYTES)
-        if len(chunk) != CHUNK_BYTES:
-            return False, f"{port}: got {len(chunk)}/{CHUNK_BYTES} bytes -- wrong firmware?", None
-        if chunk == bytes(CHUNK_BYTES):
-            return False, f"{port}: all-zero response -- device may be unresponsive", None
-        if len(set(chunk)) == 1:
-            return False, f"{port}: degenerate response (single repeated byte)", None
-        return True, f"{port}: OK -- {CHUNK_BYTES} bytes, {len(set(chunk))} distinct values", chunk
-    except serial.SerialException as e:
-        return False, f"{port}: {e}", None
+
+    result = [False, f"{port}: timeout -- no response (wrong firmware?)", None]
+
+    def _try():
+        try:
+            with serial.Serial(port, baudrate=baud, timeout=0.5) as ser:
+                time.sleep(0.1)   # brief settle
+                ser.reset_input_buffer()
+                ser.write(b"R")
+                chunk = ser.read(CHUNK_BYTES)
+            if len(chunk) != CHUNK_BYTES:
+                result[1] = f"{port}: got {len(chunk)}/{CHUNK_BYTES} bytes -- wrong firmware?"
+                return
+            if chunk == bytes(CHUNK_BYTES):
+                result[1] = f"{port}: all-zero response -- device may be unresponsive"
+                return
+            if len(set(chunk)) == 1:
+                result[1] = f"{port}: degenerate response (single repeated byte)"
+                return
+            result[0] = True
+            result[1] = f"{port}: OK -- {CHUNK_BYTES} bytes, {len(set(chunk))} distinct values"
+            result[2] = chunk
+        except serial.SerialException as e:
+            result[1] = f"{port}: {e}"
+
+    t = threading.Thread(target=_try, daemon=True)
+    t.start()
+    t.join(timeout=2.0)   # hard 2s cap per port regardless of what the serial layer does
+    return tuple(result)
 
 
 def find_pico() -> tuple:
