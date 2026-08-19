@@ -1,10 +1,11 @@
 __pycache__/
 *.pyc
-*.pyo
-*.csv
-dev.log
 *.log
-_gui_shot*.png
-*.bak
-.DS_Store
-Thumbs.db
+
+# Development logger output
+dev.log
+dev.log.1
+
+# Experimental audio entropy testbed -- never commit captured audio
+audio-entropy-testbed/*.pcm
+audio-entropy-testbed/raw_capture_*
